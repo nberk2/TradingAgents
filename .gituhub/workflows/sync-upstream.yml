@@ -1,0 +1,29 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Sync upstream changes
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        with:
+          upstream_sync_repo: TauricResearch/TradingAgents
+          upstream_sync_branch: main
+          downstream_sync_branch: main
+          target_branch_checkout_args: '-B main'
+          test_mode: false
+          
+      - name: Trigger build if changes
+        if: success()
+        run: |
+          echo "Fork synced successfully"
