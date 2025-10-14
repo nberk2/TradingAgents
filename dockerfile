@@ -2,12 +2,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Copy requirements and install all dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Gradio for web UI
-RUN pip install --no-cache-dir gradio==4.44.0
 
 # Copy application code
 COPY . .
