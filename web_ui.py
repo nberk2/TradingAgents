@@ -46,21 +46,44 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
     try:
         if not ticker or ticker.strip() == "":
             return "# ⚠️ Error: Invalid Input\n\nPlease enter a valid stock ticker symbol."
+        
         ticker = ticker.strip().upper()
         print(f"[INFO] Starting analysis for {ticker} on {analysis_date}")
 
         progress(0.1, desc="Clearing ChromaDB collections...")
         clear_chromadb_collections()
+        
         progress(0.2, desc="Initializing trading agents...")
         config = DEFAULT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=True, config=config)
         
         print(f"[INFO] Running propagate for {ticker}")
         progress(0.3, desc=f"Running multi-agent analysis for {ticker}...")
+        
+        # Run the analysis
         graph_output, decision = ta.propagate(ticker, analysis_date)
         
         print(f"[INFO] Analysis complete for {ticker}")
         progress(0.9, desc="Formatting results...")
+        
+        # Parse the graph_output to extract clean content
+        # graph_output is a dict with 'messages' key containing the conversation
+        analysis_text = ""
+        if isinstance(graph_output, dict) and 'messages' in graph_output:
+            messages = graph_output['messages']
+            for msg in messages:
+                if hasattr(msg, 'content') and msg.content:
+                    # Skip tool calls and system messages
+                    if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
+                        content = str(msg.content)
+                        # Clean up the content
+                        if len(content) > 100 and 'HumanMessage' not in content:
+                            analysis_text += f"\n\n{content}\n\n---\n"
+        else:
+            # Fallback: convert to string
+            analysis_text = str(graph_output)
+        
+        # Format the final output
         result = f"""# 📈 Trading Analysis: {ticker}
 
 **Analysis Date:** {analysis_date}  
@@ -70,13 +93,13 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 ## 🎯 Final Trading Decision
 
-**{decision}**
+### **{decision}**
 
 ---
 
-## 📊 Detailed Multi-Agent Analysis
+## 📊 Multi-Agent Analysis
 
-{graph_output}
+{analysis_text}
 
 ---
 
@@ -88,9 +111,11 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 *Powered by TradingAgents Multi-Agent LLM Framework*
 """
+        
         progress(1.0, desc="Complete!")
         save_analysis(ticker, analysis_date, result)
         
+        print(f"[INFO] Returning result to Gradio")
         return result
         
     except Exception as e:
@@ -108,6 +133,7 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 **{error_message}**
 
 ---
+
 
 ## Detailed Error Trace
 {error_details}
