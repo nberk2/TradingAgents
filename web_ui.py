@@ -16,14 +16,14 @@ ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
 
 def clear_chromadb_collections():
     try:
-        chroma_client = chromadb.PersistentClient(path=str(DATA_DIR / 'chromadb'))
-        existing_collections = [c.name for c in chroma_client.list_collections()]
-        for collection_name in ['bull_memory', 'bear_memory']:
-            if collection_name in existing_collections:
-                chroma_client.delete_collection(collection_name)
-                print(f"✓ Deleted existing collection: {collection_name}")
+        import shutil
+        chromadb_path = Path('/tmp/chromadb')
+        if chromadb_path.exists():
+            shutil.rmtree(chromadb_path)
+        chromadb_path.mkdir(parents=True, exist_ok=True)
+        print(f"✓ ChromaDB cleared: {chromadb_path}")
     except Exception as e:
-        print(f"Note: Could not clear collections: {str(e)}")
+        print(f"Note: Could not clear ChromaDB: {str(e)}")
 
 def save_analysis(ticker, analysis_date, result_text):
     try:
