@@ -19,8 +19,8 @@ jobs:
         with:
           upstream_sync_repo: TauricResearch/TradingAgents
           upstream_sync_branch: main
-          downstream_sync_branch: main
-          target_branch_checkout_args: '-B main'
+          target_sync_branch: main  # Fixed: was 'downstream_sync_branch'
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
           test_mode: false
           
       - name: Trigger build if changes
