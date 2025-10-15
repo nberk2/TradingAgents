@@ -67,24 +67,20 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
         progress(0.9, desc="Formatting results...")
         
         # Parse the graph_output to extract clean content
-        # graph_output is a dict with 'messages' key containing the conversation
         analysis_text = ""
         if isinstance(graph_output, dict) and 'messages' in graph_output:
             messages = graph_output['messages']
             for msg in messages:
                 if hasattr(msg, 'content') and msg.content:
-                    # Skip tool calls and system messages
                     if not hasattr(msg, 'tool_calls') or not msg.tool_calls:
                         content = str(msg.content)
-                        # Clean up the content
                         if len(content) > 100 and 'HumanMessage' not in content:
                             analysis_text += f"\n\n{content}\n\n---\n"
         else:
-            # Fallback: convert to string
             analysis_text = str(graph_output)
         
-        # Format the final output
-        result = f"""# 📈 Trading Analysis: {ticker}
+        # Format output for DISPLAY (with storage info)
+        display_result = f"""# 📈 Trading Analysis: {ticker}
 
 **Analysis Date:** {analysis_date}  
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -105,18 +101,37 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 ## 💾 Storage
 
-✓ Analysis saved to persistent storage at `{ANALYSIS_DIR}`
+✓ Analysis saved to persistent storage
 
 ---
 
 *Powered by TradingAgents Multi-Agent LLM Framework*
 """
         
+        # Format output for SAVING (without storage/powered by)
+        save_result = f"""# 📈 Trading Analysis: {ticker}
+
+**Analysis Date:** {analysis_date}  
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+---
+
+## 🎯 Final Trading Decision
+
+### **{decision}**
+
+---
+
+## 📊 Multi-Agent Analysis
+
+{analysis_text}
+"""
+        
         progress(1.0, desc="Complete!")
-        save_analysis(ticker, analysis_date, result)
+        save_analysis(ticker, analysis_date, save_result)  # Save clean version
         
         print(f"[INFO] Returning result to Gradio")
-        return result
+        return display_result  # Display version with storage info
         
     except Exception as e:
         error_details = traceback.format_exc()
@@ -209,10 +224,35 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
                     ticker_input = gr.Textbox(label="Stock Ticker Symbol", placeholder="SPY", value="SPY", lines=1)
                     date_input = gr.Textbox(label="Analysis Date (YYYY-MM-DD)", placeholder="2025-10-15", value=datetime.now().strftime("%Y-%m-%d"), lines=1)
                     analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg")
+                    download_btn = gr.DownloadButton("📥 Download Report", visible=False)  # Hidden initially
                     gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**30-60 seconds** for complete analysis")
                 with gr.Column(scale=4):
                     output = gr.Markdown(value="### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.", elem_classes="output-markdown")
-            analyze_btn.click(fn=analyze_stock, inputs=[ticker_input, date_input], outputs=output, show_progress=True)
+            
+            # Store the latest analysis for download
+            analysis_state = gr.State()
+            
+            def run_analysis_with_download(ticker, date):
+                result = analyze_stock(ticker, date)
+                # Save to temp file for download
+                temp_file = ANALYSIS_DIR / f"{ticker}_{date}_latest.md"
+                with open(temp_file, 'w') as f:
+                    f.write(result)
+                # Return result for display, file path for download, and update button
+                return result, str(temp_file), gr.update(visible=True, value=str(temp_file))
+            
+            analyze_btn.click(
+                fn=run_analysis_with_download,
+                inputs=[ticker_input, date_input],
+                outputs=[output, analysis_state, download_btn],
+                show_progress=True
+            )
+            
+            download_btn.click(
+                fn=lambda x: x,
+                inputs=[analysis_state],
+                outputs=None
+            )
         with gr.Tab("📂 Past Analyses"):
             gr.Markdown("## 📚 Analysis History\nReview all previously completed stock analyses.")
             with gr.Row():
