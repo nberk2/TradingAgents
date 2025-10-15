@@ -1,0 +1,22 @@
+name: Cleanup Old Container Images
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly on Sunday at 2am
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      
+    steps:
+      - name: Delete old container versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: 'tradingagents'
+          package-type: 'container'
+          min-versions-to-keep: 10  # Keep last 10 versions
+          delete-only-untagged-versions: 'false'  # Delete tagged too
+          token: ${{ secrets.GITHUB_TOKEN }}
