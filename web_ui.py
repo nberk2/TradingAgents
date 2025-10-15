@@ -47,19 +47,19 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
         if not ticker or ticker.strip() == "":
             return "# ⚠️ Error: Invalid Input\n\nPlease enter a valid stock ticker symbol."
         ticker = ticker.strip().upper()
+        print(f"[INFO] Starting analysis for {ticker} on {analysis_date}")
+
         progress(0.1, desc="Clearing ChromaDB collections...")
         clear_chromadb_collections()
         progress(0.2, desc="Initializing trading agents...")
         config = DEFAULT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=True, config=config)
+        
+        print(f"[INFO] Running propagate for {ticker}")
         progress(0.3, desc=f"Running multi-agent analysis for {ticker}...")
-        old_stdout = sys.stdout
-        sys.stdout = captured_output = StringIO()
-        try:
-            graph_output, decision = ta.propagate(ticker, analysis_date)
-            console_output = captured_output.getvalue()
-        finally:
-            sys.stdout = old_stdout
+        graph_output, decision = ta.propagate(ticker, analysis_date)
+        
+        print(f"[INFO] Analysis complete for {ticker}")
         progress(0.9, desc="Formatting results...")
         result = f"""# 📈 Trading Analysis: {ticker}
 
@@ -80,17 +80,6 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 ---
 
-## 💬 Agent Conversation Log
-
-<details>
-<summary>Click to expand full agent discussion</summary>
-
-{console_output}
-
-</details>
-
----
-
 ## 💾 Storage
 
 ✓ Analysis saved to persistent storage at `{ANALYSIS_DIR}`
@@ -101,10 +90,18 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 """
         progress(1.0, desc="Complete!")
         save_analysis(ticker, analysis_date, result)
+        
         return result
+        
     except Exception as e:
         error_details = traceback.format_exc()
         error_message = str(e)
+        
+        print("="*80)
+        print(f"[ERROR] Failed analyzing {ticker}:")
+        print(error_details)
+        print("="*80)
+        
         error_report = f"""# ⚠️ Analysis Failed for {ticker}
 
 ## Error Summary
@@ -119,17 +116,13 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 ## Troubleshooting Steps
 
-1. **Check API Keys**
-   - Verify OpenAI API key is valid and has credits
-   - Verify Alpha Vantage API key is active
-
-2. **Verify Ticker Symbol**
+1. **Verify Ticker Symbol**
    - Ensure "{ticker}" is a valid stock ticker
 
-3. **Check Logs**
+2. **Check Logs**
    - kubectl logs -n tradingagents -l app=tradingagents --tail=200
 
-4. **API Rate Limits**
+3. **API Rate Limits**
    - Alpha Vantage free tier: 25 calls/day
 
 ---
@@ -141,12 +134,7 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 **Timestamp:** {datetime.now().isoformat()}  
 **Storage Path:** {DATA_DIR}
 """
-        print("="*80)
-        print(f"ERROR analyzing {ticker}:")
-        print(error_details)
-        print("="*80)
         return error_report
-
 def load_past_analyses():
     try:
         analyses = []
