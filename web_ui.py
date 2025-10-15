@@ -1,82 +1,225 @@
 import gradio as gr
 import os
+import json
+import sys
+from io import StringIO
 from datetime import datetime
+from pathlib import Path
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+import chromadb
+import traceback
 
-def analyze_stock(ticker, analysis_date):
-    """
-    Run TradingAgents analysis on a stock ticker
-    """
+DATA_DIR = Path(os.getenv('DATA_DIR', '/tmp'))
+ANALYSIS_DIR = DATA_DIR / 'analyses'
+ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
+
+def clear_chromadb_collections():
     try:
-        # Initialize the trading graph
+        chroma_client = chromadb.PersistentClient(path=str(DATA_DIR / 'chromadb'))
+        existing_collections = [c.name for c in chroma_client.list_collections()]
+        for collection_name in ['bull_memory', 'bear_memory']:
+            if collection_name in existing_collections:
+                chroma_client.delete_collection(collection_name)
+                print(f"✓ Deleted existing collection: {collection_name}")
+    except Exception as e:
+        print(f"Note: Could not clear collections: {str(e)}")
+
+def save_analysis(ticker, analysis_date, result_text):
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{ticker}_{analysis_date}_{timestamp}"
+        json_file = ANALYSIS_DIR / f"{filename}.json"
+        with open(json_file, 'w') as f:
+            json.dump({'ticker': ticker, 'analysis_date': analysis_date, 'timestamp': datetime.now().isoformat(), 'result': result_text}, f, indent=2)
+        md_file = ANALYSIS_DIR / f"{filename}.md"
+        with open(md_file, 'w') as f:
+            f.write(result_text)
+        print(f"✓ Analysis saved to {md_file}")
+        return True
+    except Exception as e:
+        print(f"✗ Error saving analysis: {str(e)}")
+        return False
+
+def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
+    progress(0, desc="Starting analysis...")
+    try:
+        if not ticker or ticker.strip() == "":
+            return "# ⚠️ Error: Invalid Input\n\nPlease enter a valid stock ticker symbol."
+        ticker = ticker.strip().upper()
+        progress(0.1, desc="Clearing ChromaDB collections...")
+        clear_chromadb_collections()
+        progress(0.2, desc="Initializing trading agents...")
         config = DEFAULT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=True, config=config)
-        
-        # Run the analysis
-        graph_output, decision = ta.propagate(ticker.upper(), analysis_date)
-        
-        # Format the output
-        result = f"""
-# Trading Analysis for {ticker.upper()}
-**Date:** {analysis_date}
+        progress(0.3, desc=f"Running multi-agent analysis for {ticker}...")
+        old_stdout = sys.stdout
+        sys.stdout = captured_output = StringIO()
+        try:
+            graph_output, decision = ta.propagate(ticker, analysis_date)
+            console_output = captured_output.getvalue()
+        finally:
+            sys.stdout = old_stdout
+        progress(0.9, desc="Formatting results...")
+        result = f"""# 📈 Trading Analysis: {ticker}
 
-## Final Decision
-{decision}
+**Analysis Date:** {analysis_date}  
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-## Analysis Details
+---
+
+## 🎯 Final Trading Decision
+
+**{decision}**
+
+---
+
+## 📊 Detailed Multi-Agent Analysis
+
 {graph_output}
-"""
-        return result
-        
-    except Exception as e:
-        return f"Error analyzing {ticker}: {str(e)}"
 
-# Create the Gradio interface
-with gr.Blocks(title="TradingAgents Dashboard") as demo:
-    gr.Markdown("""
-    # 📈 TradingAgents Dashboard
-    ### Multi-Agent LLM Financial Trading Framework
-    
-    Enter a stock ticker symbol and date to get AI-powered trading analysis from multiple specialized agents.
-    """)
-    
-    with gr.Row():
-        with gr.Column():
-            ticker_input = gr.Textbox(
-                label="Stock Ticker Symbol",
-                placeholder="SPY, AAPL, NVDA, etc.",
-                value="SPY"
-            )
-            date_input = gr.Textbox(
-                label="Analysis Date",
-                placeholder="YYYY-MM-DD",
-                value=datetime.now().strftime("%Y-%m-%d")
-            )
-            analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary")
-        
-        with gr.Column():
-            output = gr.Markdown(
-                label="Analysis Results",
-                value="Results will appear here..."
-            )
-    
-    # Connect the button to the analysis function
-    analyze_btn.click(
-        fn=analyze_stock,
-        inputs=[ticker_input, date_input],
-        outputs=output
-    )
-    
-    gr.Markdown("""
-    ---
-    **Powered by:** TradingAgents Framework | Built with [Gradio](https://gradio.app)
-    """)
+---
+
+## 💬 Agent Conversation Log
+
+<details>
+<summary>Click to expand full agent discussion</summary>
+
+{console_output}
+
+</details>
+
+---
+
+## 💾 Storage
+
+✓ Analysis saved to persistent storage at `{ANALYSIS_DIR}`
+
+---
+
+*Powered by TradingAgents Multi-Agent LLM Framework*
+"""
+        progress(1.0, desc="Complete!")
+        save_analysis(ticker, analysis_date, result)
+        return result
+    except Exception as e:
+        error_details = traceback.format_exc()
+        error_message = str(e)
+        error_report = f"""# ⚠️ Analysis Failed for {ticker}
+
+## Error Summary
+**{error_message}**
+
+---
+
+## Detailed Error Trace
+{error_details}
+
+---
+
+## Troubleshooting Steps
+
+1. **Check API Keys**
+   - Verify OpenAI API key is valid and has credits
+   - Verify Alpha Vantage API key is active
+
+2. **Verify Ticker Symbol**
+   - Ensure "{ticker}" is a valid stock ticker
+
+3. **Check Logs**
+   - kubectl logs -n tradingagents -l app=tradingagents --tail=200
+
+4. **API Rate Limits**
+   - Alpha Vantage free tier: 25 calls/day
+
+---
+
+## Debug Information
+
+**Ticker:** {ticker}  
+**Date:** {analysis_date}  
+**Timestamp:** {datetime.now().isoformat()}  
+**Storage Path:** {DATA_DIR}
+"""
+        print("="*80)
+        print(f"ERROR analyzing {ticker}:")
+        print(error_details)
+        print("="*80)
+        return error_report
+
+def load_past_analyses():
+    try:
+        analyses = []
+        for json_file in sorted(ANALYSIS_DIR.glob("*.json"), reverse=True):
+            try:
+                with open(json_file, 'r') as f:
+                    data = json.load(f)
+                    analyses.append({'filename': json_file.stem, 'ticker': data.get('ticker', 'Unknown'), 'date': data.get('analysis_date', 'Unknown'), 'timestamp': data.get('timestamp', 'Unknown')})
+            except:
+                continue
+        return analyses
+    except:
+        return []
+
+def load_analysis_content(filename):
+    if not filename:
+        return "### Select an analysis from the dropdown to view it."
+    try:
+        json_file = ANALYSIS_DIR / f"{filename}.json"
+        if json_file.exists():
+            with open(json_file, 'r') as f:
+                data = json.load(f)
+                return data.get('result', 'No content found')
+        return "### Analysis file not found"
+    except Exception as e:
+        return f"### Error Loading Analysis\n\n{str(e)}"
+
+def refresh_analysis_list():
+    analyses = load_past_analyses()
+    if not analyses:
+        return gr.Dropdown(choices=["No analyses found"])
+    analysis_options = [f"{a['ticker']} - {a['date']} ({a['timestamp'][:10]})" for a in analyses]
+    analysis_filenames = [a['filename'] for a in analyses]
+    return gr.Dropdown(choices=list(zip(analysis_options, analysis_filenames)))
+
+with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
+    .output-markdown {height: 70vh !important; overflow-y: auto !important; overflow-x: hidden !important;}
+    .gradio-container {max-width: 1600px !important;}
+    .input-column {max-width: 350px;}
+""") as demo:
+    gr.Markdown("# 📈 TradingAgents Dashboard\n### Multi-Agent LLM Financial Trading Framework\n\nGet AI-powered trading analysis from specialized agents")
+    with gr.Tabs():
+        with gr.Tab("🔍 New Analysis"):
+            with gr.Row():
+                with gr.Column(scale=1, elem_classes="input-column"):
+                    ticker_input = gr.Textbox(label="Stock Ticker Symbol", placeholder="SPY", value="SPY", lines=1)
+                    date_input = gr.Textbox(label="Analysis Date (YYYY-MM-DD)", placeholder="2025-10-15", value=datetime.now().strftime("%Y-%m-%d"), lines=1)
+                    analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg")
+                    gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**30-60 seconds** for complete analysis")
+                with gr.Column(scale=4):
+                    output = gr.Markdown(value="### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.", elem_classes="output-markdown")
+            analyze_btn.click(fn=analyze_stock, inputs=[ticker_input, date_input], outputs=output, show_progress=True)
+        with gr.Tab("📂 Past Analyses"):
+            gr.Markdown("## 📚 Analysis History\nReview all previously completed stock analyses.")
+            with gr.Row():
+                with gr.Column(scale=1, elem_classes="input-column"):
+                    refresh_btn = gr.Button("🔄 Refresh List", size="sm")
+                    analyses = load_past_analyses()
+                    if analyses:
+                        analysis_options = [f"{a['ticker']} - {a['date']} ({a['timestamp'][:10]})" for a in analyses]
+                        analysis_filenames = [a['filename'] for a in analyses]
+                        choices = list(zip(analysis_options, analysis_filenames))
+                    else:
+                        choices = ["No analyses found"]
+                    analysis_dropdown = gr.Dropdown(label="Select Analysis", choices=choices, value=None)
+                    load_btn = gr.Button("📄 Load Analysis", variant="primary")
+                    gr.Markdown(f"### 💾 Storage\n**Path:** `{ANALYSIS_DIR}`\n**Count:** {len(analyses)} analyses")
+                with gr.Column(scale=4):
+                    past_output = gr.Markdown(value="### Select an analysis to view it.", elem_classes="output-markdown")
+            refresh_btn.click(fn=refresh_analysis_list, outputs=analysis_dropdown)
+            load_btn.click(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
+            analysis_dropdown.change(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
+    gr.Markdown("---\n**Version:** 1.0.5 | **Framework:** [TradingAgents](https://github.com/TauricResearch/TradingAgents)")
 
 if __name__ == "__main__":
-    # Run the web interface
-    demo.launch(
-        server_name="0.0.0.0",
-        server_port=5000,
-        share=False
-    )
+    demo.launch(server_name="0.0.0.0", server_port=5000, share=False, show_error=True)
