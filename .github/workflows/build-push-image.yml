@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'web_ui.py'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'tradingagents/**'
+      - '!.github/**'  # Ignore workflow changes
+      - '!README.md'
+      - '!*.md'
   workflow_dispatch:
 
 env:
