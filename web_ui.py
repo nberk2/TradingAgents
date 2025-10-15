@@ -1,14 +1,15 @@
 import gradio as gr
 import os
 import json
-import sys
-from io import StringIO
 from datetime import datetime
 from pathlib import Path
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 import chromadb
 import traceback
+
+# Get version from environment variable (set by Docker build)
+APP_VERSION = os.getenv('APP_VERSION', 'dev')
 
 DATA_DIR = Path(os.getenv('DATA_DIR', '/tmp'))
 ANALYSIS_DIR = DATA_DIR / 'analyses'
@@ -234,8 +235,8 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
             
             def run_analysis_with_download(ticker, date):
                 result = analyze_stock(ticker, date)
-                # Save to temp file for download
-                temp_file = ANALYSIS_DIR / f"{ticker}_{date}_latest.md"
+                # Save to /tmp for download (Gradio allows this)
+                temp_file = Path('/tmp') / f"{ticker}_{date}_latest.md"
                 with open(temp_file, 'w') as f:
                     f.write(result)
                 # Return result for display, file path for download, and update button
@@ -273,7 +274,7 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
             refresh_btn.click(fn=refresh_analysis_list, outputs=analysis_dropdown)
             load_btn.click(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
             analysis_dropdown.change(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
-    gr.Markdown("---\n**Version:** 1.0.5 | **Framework:** [TradingAgents](https://github.com/TauricResearch/TradingAgents)")
+    gr.Markdown(f"---\n**Version:** {APP_VERSION} | **Framework:** [TradingAgents](https://github.com/TauricResearch/TradingAgents)")
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=5000, share=False, show_error=True)

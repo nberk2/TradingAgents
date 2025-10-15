@@ -1,5 +1,9 @@
 FROM python:3.13-slim
 
+# Accept version as build argument
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 WORKDIR /app
 
 # Copy requirements and install all dependencies

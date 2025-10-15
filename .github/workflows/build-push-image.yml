@@ -67,5 +67,7 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
