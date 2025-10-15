@@ -1,6 +1,8 @@
 import gradio as gr
 import os
 import json
+import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -14,6 +16,9 @@ APP_VERSION = os.getenv('APP_VERSION', 'dev')
 DATA_DIR = Path(os.getenv('DATA_DIR', '/tmp'))
 ANALYSIS_DIR = DATA_DIR / 'analyses'
 ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
+STATUS_DIR = DATA_DIR / 'status'
+STATUS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def clear_chromadb_collections():
     try:
@@ -25,6 +30,7 @@ def clear_chromadb_collections():
         print(f"✓ ChromaDB cleared: {chromadb_path}")
     except Exception as e:
         print(f"Note: Could not clear ChromaDB: {str(e)}")
+
 
 def save_analysis(ticker, analysis_date, result_text):
     try:
@@ -42,32 +48,42 @@ def save_analysis(ticker, analysis_date, result_text):
         print(f"✗ Error saving analysis: {str(e)}")
         return False
 
-def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
-    progress(0, desc="Starting analysis...")
-    try:
-        if not ticker or ticker.strip() == "":
-            return "# ⚠️ Error: Invalid Input\n\nPlease enter a valid stock ticker symbol."
-        
-        ticker = ticker.strip().upper()
-        print(f"[INFO] Starting analysis for {ticker} on {analysis_date}")
 
-        progress(0.1, desc="Clearing ChromaDB collections...")
+def analyze_stock_async(ticker, analysis_date, session_id):
+    """Run analysis in background thread - preserves all existing logic"""
+    status_file = STATUS_DIR / f"{session_id}.json"
+    
+    try:
+        ticker = ticker.strip().upper()
+        print(f"[INFO] Starting ASYNC analysis for {ticker} on {analysis_date}")
+        
+        # Update status: initializing
+        with open(status_file, 'w') as f:
+            json.dump({'status': 'running', 'ticker': ticker, 'progress': 10, 'message': 'Starting analysis...'}, f)
+        
+        # Clear ChromaDB
+        with open(status_file, 'w') as f:
+            json.dump({'status': 'running', 'ticker': ticker, 'progress': 20, 'message': 'Clearing ChromaDB collections...'}, f)
         clear_chromadb_collections()
         
-        progress(0.2, desc="Initializing trading agents...")
+        # Initialize agents
+        with open(status_file, 'w') as f:
+            json.dump({'status': 'running', 'ticker': ticker, 'progress': 30, 'message': 'Initializing trading agents...'}, f)
         config = DEFAULT_CONFIG.copy()
         ta = TradingAgentsGraph(debug=True, config=config)
         
         print(f"[INFO] Running propagate for {ticker}")
-        progress(0.3, desc=f"Running multi-agent analysis for {ticker}...")
+        with open(status_file, 'w') as f:
+            json.dump({'status': 'running', 'ticker': ticker, 'progress': 40, 'message': f'Running multi-agent analysis for {ticker}...'}, f)
         
-        # Run the analysis
+        # Run the analysis (same as before)
         graph_output, decision = ta.propagate(ticker, analysis_date)
         
         print(f"[INFO] Analysis complete for {ticker}")
-        progress(0.9, desc="Formatting results...")
+        with open(status_file, 'w') as f:
+            json.dump({'status': 'running', 'ticker': ticker, 'progress': 90, 'message': 'Formatting results...'}, f)
         
-        # Parse the graph_output to extract clean content
+        # Parse the graph_output to extract clean content (same as before)
         analysis_text = ""
         if isinstance(graph_output, dict) and 'messages' in graph_output:
             messages = graph_output['messages']
@@ -80,7 +96,7 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
         else:
             analysis_text = str(graph_output)
         
-        # Format output for DISPLAY (with storage info)
+        # Format output for DISPLAY (with storage info) - same as before
         display_result = f"""# 📈 Trading Analysis: {ticker}
 
 **Analysis Date:** {analysis_date}  
@@ -109,7 +125,7 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 *Powered by TradingAgents Multi-Agent LLM Framework*
 """
         
-        # Format output for SAVING (without storage/powered by)
+        # Format output for SAVING (without storage/powered by) - same as before
         save_result = f"""# 📈 Trading Analysis: {ticker}
 
 **Analysis Date:** {analysis_date}  
@@ -128,11 +144,28 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 {analysis_text}
 """
         
-        progress(1.0, desc="Complete!")
-        save_analysis(ticker, analysis_date, save_result)  # Save clean version
+        # Save clean version to persistent storage
+        save_analysis(ticker, analysis_date, save_result)
         
-        print(f"[INFO] Returning result to Gradio")
-        return display_result  # Display version with storage info
+        # Save to /tmp for download (Gradio allows this)
+        temp_file = Path('/tmp') / f"{ticker}_{analysis_date}_latest.md"
+        with open(temp_file, 'w') as f:
+            f.write(display_result)
+        
+        print(f"[INFO] Returning result to Gradio (via status file)")
+        
+        # Update status: complete
+        with open(status_file, 'w') as f:
+            json.dump({
+                'status': 'complete',
+                'ticker': ticker,
+                'result': display_result,
+                'download_path': str(temp_file),
+                'progress': 100,
+                'message': 'Analysis complete!'
+            }, f)
+        
+        print(f"[INFO] ASYNC analysis complete - status file updated")
         
     except Exception as e:
         error_details = traceback.format_exc()
@@ -150,7 +183,6 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 
 ---
 
-
 ## Detailed Error Trace
 {error_details}
 
@@ -165,7 +197,7 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
    - kubectl logs -n tradingagents -l app=tradingagents --tail=200
 
 3. **API Rate Limits**
-   - Alpha Vantage free tier: 25 calls/day
+- Alpha Vantage free tier: 25 calls/day
 
 ---
 
@@ -176,7 +208,102 @@ def analyze_stock(ticker, analysis_date, progress=gr.Progress()):
 **Timestamp:** {datetime.now().isoformat()}  
 **Storage Path:** {DATA_DIR}
 """
-        return error_report
+     
+        with open(status_file, 'w') as f:
+            json.dump({
+                'status': 'error',
+                'ticker': ticker,
+                'result': error_report,
+                'error': str(e)
+            }, f)
+
+
+def check_analysis_status(session_id):
+    """Poll for analysis completion - called every 2 seconds"""
+    if not session_id:
+        return (
+            "### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.",
+            gr.update(visible=False),
+            session_id
+        )
+    
+    status_file = STATUS_DIR / f"{session_id}.json"
+    
+    if not status_file.exists():
+        return (
+            "### ⏳ Initializing analysis...",
+            gr.update(visible=False),
+            session_id
+        )
+    
+    try:
+        with open(status_file, 'r') as f:
+            status = json.load(f)
+    except:
+        return (
+            "### ⏳ Loading status...",
+            gr.update(visible=False),
+            session_id
+        )
+    
+    if status['status'] == 'running':
+        progress = status.get('progress', 0)
+        ticker = status.get('ticker', '...')
+        message = status.get('message', 'Processing...')
+        return (
+            f"### ⏳ Analysis in Progress: {ticker}\n\n**Progress:** {progress}%\n\n**Status:** {message}\n\n*Page auto-updates every 2 seconds...*",
+            gr.update(visible=False),
+            session_id
+        )
+    
+    elif status['status'] == 'complete':
+        result = status.get('result', 'Analysis complete but result missing')
+        download_path = status.get('download_path')
+        # Clear session to stop polling
+        return (
+            result,
+            gr.update(visible=True, value=download_path),
+            None
+        )
+    
+    elif status['status'] == 'error':
+        result = status.get('result', 'Unknown error occurred')
+        # Clear session to stop polling
+        return (
+            result,
+            gr.update(visible=False),
+            None
+        )
+    
+    return (
+        "### Unknown status",
+        gr.update(visible=False),
+        session_id
+    )
+
+
+def start_analysis(ticker, date):
+    """Start analysis in background thread - returns immediately"""
+    if not ticker or ticker.strip() == "":
+        return (
+            "# ⚠️ Error: Invalid Input\n\nPlease enter a valid stock ticker symbol.",
+            gr.update(visible=False),
+            None
+        )
+    
+    session_id = str(uuid.uuid4())
+    
+    # Start background thread
+    thread = threading.Thread(target=analyze_stock_async, args=(ticker, date, session_id), daemon=True)
+    thread.start()
+    
+    return (
+        f"### ⏳ Starting Analysis: {ticker.upper()}\n\n*Initializing agents and data sources...*\n\n*Page will auto-update when complete*",
+        gr.update(visible=False),
+        session_id
+    )
+
+
 def load_past_analyses():
     try:
         analyses = []
@@ -191,6 +318,7 @@ def load_past_analyses():
     except:
         return []
 
+
 def load_analysis_content(filename):
     if not filename:
         return "### Select an analysis from the dropdown to view it."
@@ -204,6 +332,7 @@ def load_analysis_content(filename):
     except Exception as e:
         return f"### Error Loading Analysis\n\n{str(e)}"
 
+
 def refresh_analysis_list():
     analyses = load_past_analyses()
     if not analyses:
@@ -212,12 +341,15 @@ def refresh_analysis_list():
     analysis_filenames = [a['filename'] for a in analyses]
     return gr.Dropdown(choices=list(zip(analysis_options, analysis_filenames)))
 
+
+# Gradio UI
 with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
     .output-markdown {height: 70vh !important; overflow-y: auto !important; overflow-x: hidden !important;}
     .gradio-container {max-width: 1600px !important;}
     .input-column {max-width: 350px;}
 """) as demo:
     gr.Markdown("# 📈 TradingAgents Dashboard\n### Multi-Agent LLM Financial Trading Framework\n\nGet AI-powered trading analysis from specialized agents")
+    
     with gr.Tabs():
         with gr.Tab("🔍 New Analysis"):
             with gr.Row():
@@ -225,35 +357,29 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
                     ticker_input = gr.Textbox(label="Stock Ticker Symbol", placeholder="SPY", value="SPY", lines=1)
                     date_input = gr.Textbox(label="Analysis Date (YYYY-MM-DD)", placeholder="2025-10-15", value=datetime.now().strftime("%Y-%m-%d"), lines=1)
                     analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg")
-                    download_btn = gr.DownloadButton("📥 Download Report", visible=False)  # Hidden initially
-                    gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**30-60 seconds** for complete analysis")
+                    download_btn = gr.DownloadButton("📥 Download Report", visible=False)
+                    gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**Auto-updates** when complete (30-60 sec)")
                 with gr.Column(scale=4):
                     output = gr.Markdown(value="### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.", elem_classes="output-markdown")
             
-            # Store the latest analysis for download
-            analysis_state = gr.State()
+            # Hidden session state for tracking analysis
+            session_state = gr.State()
             
-            def run_analysis_with_download(ticker, date):
-                result = analyze_stock(ticker, date)
-                # Save to /tmp for download (Gradio allows this)
-                temp_file = Path('/tmp') / f"{ticker}_{date}_latest.md"
-                with open(temp_file, 'w') as f:
-                    f.write(result)
-                # Return result for display, file path for download, and update button
-                return result, str(temp_file), gr.update(visible=True, value=str(temp_file))
-            
+            # Start analysis (non-blocking)
             analyze_btn.click(
-                fn=run_analysis_with_download,
+                fn=start_analysis,
                 inputs=[ticker_input, date_input],
-                outputs=[output, analysis_state, download_btn],
-                show_progress=True
+                outputs=[output, download_btn, session_state]
             )
             
-            download_btn.click(
-                fn=lambda x: x,
-                inputs=[analysis_state],
-                outputs=None
+            # Auto-polling: checks status every 2 seconds
+            demo.load(
+                fn=check_analysis_status,
+                inputs=[session_state],
+                outputs=[output, download_btn, session_state],
+                every=2
             )
+        
         with gr.Tab("📂 Past Analyses"):
             gr.Markdown("## 📚 Analysis History\nReview all previously completed stock analyses.")
             with gr.Row():
@@ -274,7 +400,10 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
             refresh_btn.click(fn=refresh_analysis_list, outputs=analysis_dropdown)
             load_btn.click(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
             analysis_dropdown.change(fn=load_analysis_content, inputs=analysis_dropdown, outputs=past_output)
+    
     gr.Markdown(f"---\n**Version:** {APP_VERSION} | **Framework:** [TradingAgents](https://github.com/TauricResearch/TradingAgents)")
+
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=5000, share=False, show_error=True)
+
