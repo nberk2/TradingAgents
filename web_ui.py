@@ -47,7 +47,7 @@ def save_analysis(ticker, analysis_date, result_text):
         return False
 
 def analyze_stock_async(ticker, analysis_date, session_id):
-    """Run analysis in background thread - preserves all existing logic"""
+    """Run analysis in background thread"""
     status_file = STATUS_DIR / f"{session_id}.json"
     
     try:
@@ -173,7 +173,6 @@ def analyze_stock_async(ticker, analysis_date, session_id):
 ## Detailed Error Trace
 {error_details}
 
-
 ---
 
 ## Debug Information
@@ -193,7 +192,7 @@ def analyze_stock_async(ticker, analysis_date, session_id):
             }, f)
 
 def check_analysis_status(session_id):
-    """Poll for analysis completion - called every 2 seconds"""
+    """Check status file for completion"""
     if not session_id:
         return (
             "### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.",
@@ -205,7 +204,7 @@ def check_analysis_status(session_id):
     
     if not status_file.exists():
         return (
-            "### ⏳ Initializing analysis...",
+            "### ⏳ Initializing analysis...\n\nClick **Check Status** in 10 seconds.",
             gr.update(visible=False),
             session_id
         )
@@ -215,7 +214,7 @@ def check_analysis_status(session_id):
             status = json.load(f)
     except:
         return (
-            "### ⏳ Loading status...",
+            "### ⏳ Loading status...\n\nClick **Check Status** again.",
             gr.update(visible=False),
             session_id
         )
@@ -225,7 +224,7 @@ def check_analysis_status(session_id):
         ticker = status.get('ticker', '...')
         message = status.get('message', 'Processing...')
         return (
-            f"### ⏳ Analysis in Progress: {ticker}\n\n**Progress:** {progress}%\n\n**Status:** {message}\n\n*Page auto-updates every 2 seconds...*",
+            f"### ⏳ Analysis in Progress: {ticker}\n\n**Progress:** {progress}%\n\n**Status:** {message}\n\n*Click **Check Status** in 10-20 seconds to see results*",
             gr.update(visible=False),
             session_id
         )
@@ -267,7 +266,7 @@ def start_analysis(ticker, date):
     thread.start()
     
     return (
-        f"### ⏳ Starting Analysis: {ticker.upper()}\n\n*Initializing agents and data sources...*\n\n*Page will auto-update when complete*",
+        f"### ⏳ Analysis Started: {ticker.upper()}\n\n**Analysis running in background...**\n\nClick **Check Status** in 30-60 seconds to see results.",
         gr.update(visible=False),
         session_id
     )
@@ -321,13 +320,17 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
                 with gr.Column(scale=1, elem_classes="input-column"):
                     ticker_input = gr.Textbox(label="Stock Ticker Symbol", placeholder="SPY", value="SPY", lines=1)
                     date_input = gr.Textbox(label="Analysis Date (YYYY-MM-DD)", placeholder="2025-10-15", value=datetime.now().strftime("%Y-%m-%d"), lines=1)
-                    analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg")
+                    
+                    with gr.Row():
+                        analyze_btn = gr.Button("🔍 Analyze Stock", variant="primary", size="lg", scale=2)
+                        check_btn = gr.Button("🔄 Check Status", variant="secondary", size="lg", scale=1)
+                    
                     download_btn = gr.DownloadButton("📥 Download Report", visible=False)
-                    gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**Auto-updates** when complete (30-60 sec)")
+                    gr.Markdown("### 📌 Popular Tickers\n**Indices:** SPY, QQQ, DIA, IWM\n**Tech:** AAPL, NVDA, MSFT, GOOGL\n**Growth:** TSLA, ASTS, PLTR, COIN\n\n### ⏱️ Analysis Time\n**30-60 seconds** - Click **Check Status** when ready")
                 with gr.Column(scale=4):
                     output = gr.Markdown(value="### 🚀 Ready to Analyze!\n\nEnter a stock ticker and click **Analyze Stock**.", elem_classes="output-markdown")
             
-            # Hidden session state for tracking analysis
+            # Hidden session state
             session_state = gr.State()
             
             # Start analysis (non-blocking)
@@ -337,11 +340,8 @@ with gr.Blocks(title="TradingAgents Dashboard", theme=gr.themes.Soft(), css="""
                 outputs=[output, download_btn, session_state]
             )
             
-            # Create a timer that ticks every 2 seconds
-            poll_timer = gr.Timer(value=2)
-            
-            # Timer triggers status check
-            poll_timer.tick(
+            # Manual status check
+            check_btn.click(
                 fn=check_analysis_status,
                 inputs=[session_state],
                 outputs=[output, download_btn, session_state]
