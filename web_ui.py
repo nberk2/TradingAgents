@@ -22,13 +22,22 @@ STATUS_DIR.mkdir(parents=True, exist_ok=True)
 def clear_chromadb_collections():
     try:
         import shutil
+        import chromadb
+        import gc
+        
+        # Force garbage collection to release any ChromaDB clients
+        gc.collect()
+        
+        # Clear the directory
         chromadb_path = Path('/tmp/chromadb')
         if chromadb_path.exists():
-            shutil.rmtree(chromadb_path)
+            shutil.rmtree(chromadb_path, ignore_errors=True)
+        
         chromadb_path.mkdir(parents=True, exist_ok=True)
         print(f"✓ ChromaDB cleared: {chromadb_path}")
+        
     except Exception as e:
-        print(f"Note: Could not clear ChromaDB: {str(e)}")
+        print(f"⚠️ Could not clear ChromaDB: {str(e)}")
 
 def save_analysis(ticker, analysis_date, result_text):
     try:
