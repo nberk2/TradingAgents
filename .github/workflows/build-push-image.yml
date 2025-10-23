@@ -9,7 +9,7 @@ on:
       - 'Dockerfile'
       - 'requirements.txt'
       - 'tradingagents/**'
-      - '!.github/**'  # Ignore workflow changes
+      - '!.github/**'
       - '!README.md'
       - '!*.md'
   workflow_dispatch:
@@ -29,20 +29,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Get full history for versioning
+          fetch-depth: 0
         
       - name: Generate version number
         id: version
         run: |
-          # Get the count of commits on main branch
           COMMIT_COUNT=$(git rev-list --count HEAD)
-          # Get short SHA
           SHORT_SHA=$(git rev-parse --short HEAD)
-          # Create version: v1.0.COMMIT_COUNT
           VERSION="v1.0.${COMMIT_COUNT}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "Generated version: ${VERSION}"
+        
+      # Enable ARM64 emulation
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -60,6 +61,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          platforms: linux/amd64,linux/arm64  
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
